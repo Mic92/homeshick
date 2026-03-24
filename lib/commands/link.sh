@@ -123,5 +123,41 @@ get_repo_files() {
     # Unfortunately we have to use an external script for `git submodule foreach'
     # because versions prior to ~ 2.0 use `eval' to execute the argument.
     # This somehow messes quite badly with string substitution.
-  ) | sort -zu # sort the results and make the list unique (-u), NUL is the line separator (-z)
+  ) | sort -zu | filter_ignored "$root" # sort the results and make the list unique (-u), NUL is the line separator (-z)
+}
+
+# Reads .homesickignore and filters out paths that match the current host.
+# Lines before any [section] apply to all hosts.
+# Section headers are glob-matched against $(hostname).
+filter_ignored() {
+  local root=$1
+  local ignorefile="$root/.homesickignore"
+  if [[ ! -f $ignorefile ]]; then
+    cat
+    return
+  fi
+  local patterns=()
+  local host
+  host=$(hostname)
+  local active=true # lines before any section apply globally
+  while IFS= read -r line; do
+    [[ -z $line || $line == \#* ]] && continue
+    if [[ $line =~ ^\[(.+)\]$ ]]; then
+      local section="${BASH_REMATCH[1]}"
+      # Use bash glob matching for section headers
+      # shellcheck disable=SC2053
+      if [[ $host == $section ]]; then
+        active=true
+      else
+        active=false
+      fi
+      continue
+    fi
+    $active && patterns+=("$line")
+  done < "$ignorefile"
+  if [[ ${#patterns[@]} -eq 0 ]]; then
+    cat
+    return
+  fi
+  grep -z -v -F -x -f <(printf '%s\n' "${patterns[@]}")
 }
